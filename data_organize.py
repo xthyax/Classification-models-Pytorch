@@ -129,8 +129,8 @@ def create_table(data_path, config):
                 binary_label = 'Reject' if (label in config.FAILCLASS_NAME) or (label=="Reject") else 'Pass'
                 data_info.append(binary_label)
                 # Apeend origin name and component name (temp)
-                data_info.append(filename)
-                data_info.append(filename)
+                data_info.append(filename.split(".")[0])
+                data_info.append(filename.split(".")[0])
 
                 # dataframe_ls.append(data_info)
                 dataframe.loc[len(dataframe)] = data_info
@@ -177,6 +177,7 @@ def updating_data(table_path, data_path):
             # print(augment_ls)
             if table_data.loc[data_loc]["Extension"] == "bmp":
                 make_augment(patch_image_path, image_name, data_path, augment_ls)
+                
             else:
                 pass
 
@@ -222,8 +223,10 @@ def update_origin_name(table_path, patch_table):
 
     table_data["Origin_name"] = table_data["Image_name"]
 
-    for new_img in patch_data["new_img"]:
-        patch_location = np.where(patch_data["new_img"]==new_img)[0][0]
+    # for new_img in patch_data["new_img"]:
+    #     patch_location = np.where(patch_data["new_img"]==new_img)[0][0]
+    for new_img in patch_data["new_mvsd"]:
+        patch_location = np.where(patch_data["new_mvsd"]==new_img)[0][0]
         try:
             data_loc = np.where(table_data["Origin_name"] == new_img.split("/")[-1].split(".")[0])[0][0]
             origin_name = patch_data["original_img"][patch_location].split("/")[-1].split(".")[0]
