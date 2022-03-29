@@ -18,6 +18,12 @@ class LoadConfig:
         self.NO_EPOCH = self.config['NoEpoch']
         self.CHANGE_BOX_SIZE = self.config['ChangeBoxSize']
         try:
+            self.BINARY = self.config['IfBinarySegregate']
+
+        except:
+            self.BINARY = 0
+
+        try:
             self.IS_SAVE_BEST_MODELS = self.config['isSaveBestModels']
         except:
             self.IS_SAVE_BEST_MODELS = "False"
@@ -53,11 +59,17 @@ class LoadConfig:
             self.TRAINING_LAYER = self.config['TrainingLayer']
         except:
             self.TRAINING_LAYER = "All"
-
+        
         try:
             self.NUM_WORKERS = self.config['Num_Workers']
         except:
             self.NUM_WORKERS = 0
+
+        try:
+            self.IndexTrainingLayer = self.config["IndexTrainingLayer"]
+        except:
+            self.IndexTrainingLayer = 0
+
 
     def __read_json(self):
         with open(self.json_file) as f:

@@ -1,121 +1,204 @@
 import os
-import cv2
-import pandas as pd
-import numpy as np
 import glob
 import json
 import torch
+import numpy as np
 from torch.utils.data import Dataset
 from .utils import preprocess_input, load_and_crop, metadata_count
 import random
 
-class DataGenerator(Dataset):
-    def __init__(self, input_dir, classes, failClasses, passClasses, input_size, binary_option, testing=False, crop=True, augmentation=None):
+class LoadingData:
+    def __init__(self, input_dir, classes, failClasses, passClasses, input_size, binary_option, log, index_layer=0, loadToMemory=True, augmentation=None):
         """
-            Args:
-                input_dir (list): list of input image
-                label (list): list of label corresponding to each image
-                classes (list): list of class
-                height (int) : desire height
-                width (int): desire width
-                transform: pytorch transforms for transforms and tensor conversion
-                augmentation: augment function
+        Args:
+            input_dir (str): path input
+            classes (list): list of class
+            failClasses (list) : list fail classes
+            passClasses (list) : list pass classes
+            input_size (int) : desire width and height
+            binary_option (bool) : Binary/Multi classification
+            log (obj) : log obj for logging
+            index_layer (int) : layer index
+            augmentation (list): list augment option
+
+        Use:
+            Use load_data(self) function to return data dictionary
         """
-        super(DataGenerator, self).__init__()
-        if isinstance(input_dir, list):
-            self.input_dir = input_dir
-        else:
-            self.input_dir = [input_dir]
+        self.log = log
+        self.input_dir = input_dir
         self.failClasses = failClasses
         self.passClasses = passClasses
         self.binary_option = binary_option
+        self.index_layer = index_layer
         self.classes = self.load_classes(classes)
-        self.num_of_classes = len(classes)
-        self.crop = crop
         self.input_size = input_size
-        self.img_path_labels = self.load_data()
-        self.metadata = metadata_count(self.input_dir, self.classes, self.gt_list, show_table=True)
-        self.augmentation= augmentation
-        self.testing = testing
-    #     self.seeds = None
-    #     self.set_up_new_seeds()
-
-    # def set_up_new_seeds(self):
-    #     self.seeds = self.get_new_seeds()
-
-    # def get_new_seeds(self):
-    #     return np.random.randint(0, 100, len(self))
+        self.load_to_memory = loadToMemory
+        self.augmentation = augmentation
 
     def load_classes(self, classes):
         if self.binary_option:
-            return ['Reject', 'Pass']
+            return ['Fail', 'Pass']
         else:
-            return classes  
+            return classes
+
     def load_data(self):
-        img_path_labels = []
-        self.gt_list = []
-        for path_data in self.input_dir:
-            # print(f"[DEBUG] path_data.lower(): {path_data.lower()}")
-            if "train" in path_data.lower().split("\\")[-1]:
-                path_data = os.path.join(path_data,"OriginImage")
-            else:
-                pass
-            
-            # for img_path in glob.glob(os.path.join(path_data,"*.npz")):
-            for img_path in glob.glob(os.path.join(path_data,"*.bmp")):
+        img_path_labels = {
+            "path": [],
+            "img_path": [],
+            "img_label": [],
+            "img_content": [],
+            "transform_img_path": [],
+            "transform_img_label": [],
+            "transform_img_content": [],
+        }
+
+        paths_data = []
+        img_path_labels["path"].append(self.input_dir)
+
+        if "train" in self.input_dir.lower().split("\\")[-1]:
+            paths_data.append(os.path.join(self.input_dir, "OriginImage"))
+
+            if self.augmentation is not None:
+                paths_data.append(os.path.join(self.input_dir, "TransformImage"))
+
+        else:
+            paths_data.append(self.input_dir)
+
+        for path_data in paths_data:
+            self.log.write_log(f"Loading data from {path_data}", message_type=0)
+
+            list_img_path = [f for f_ in [glob.glob(e) for e in
+                                          [os.path.join(path_data, "*.mvsd"), os.path.join(path_data, "*.bmp")]] for
+                             f in f_]
+
+            if len(list_img_path) == 0:
+                message = f"Folder path {path_data} is empty. Please check {path_data}."
+                raise Exception(message)
+
+            for img_path in list_img_path:
                 json_path = img_path + ".json"
-                # print(f"[DEBUG] {json_path}")
+                ## Read and preprocess image
+                if self.load_to_memory:
+                    try:
+                        img, _ = load_and_crop(img_path, self.input_size, index_layer=self.index_layer)
+                        img = img.copy()
+                        img = preprocess_input(img)
+
+                    except Exception as e:
+                        message = f'Due to {e} cannot load image: {img_path}'
+                        raise Exception(message)
+
+                else:
+                    img = np.zeros((self.input_size, self.index_layer))
+
                 try:
                     with open(json_path, encoding='utf-8') as json_file:
                         json_data = json.load(json_file)
-                        # print("[DEBUG] Json opened")
+
                     if self.binary_option:
-                        id_image = 'Reject' if json_data['classId'][0] in self.failClasses else 'Pass'
-                        # print(f'[DEBUG] {id_image}')
+                        id_image = 'Fail' if json_data['classId'][0] in self.failClasses else 'Pass'
+
                     else:
                         id_image = json_data['classId'][0]
-                    self.gt_list.append(id_image)
-                    img_path_labels.append( (img_path, self.classes.index(id_image)) )
-                except:
-                    img_path_labels.append( (img_path, self.num_of_classes) )
-                    print(f"[DEBUG] Missing {json_path}")
-        # print(f"[DEBUG] {img_path_labels}")
+
+                    if "transform" in path_data.lower().split("\\")[-1]:
+                        img_path_labels["transform_img_path"].append(img_path)
+                        img_path_labels["transform_img_label"].append(id_image)
+                        img_path_labels["transform_img_content"].append(img)
+
+                    else:
+                        img_path_labels["img_path"].append(img_path)
+                        img_path_labels["img_label"].append(id_image)
+                        img_path_labels["img_content"].append(img)
+
+                except Exception as e:
+                    message = f"Due to {e}. Please check your JSON file at {json_path} if it's in the correct format or it's missing"
+                    # raise Exception(message)
+                    img_path_labels["img_path"].append(img_path)
+                    img_path_labels["img_label"].append("unclassified")
+                    img_path_labels["img_content"].append(img)
+
+            metadata_count(path_data, self.classes,
+                           img_path_labels["transform_img_label"] if "transform" in path_data.lower().split("\\")[
+                               -1] else img_path_labels["img_label"],
+                           self.log, show_table=True)
+
+            total_image = len(img_path_labels["transform_img_label"] if "transform" in path_data.lower().split("\\")[-1] else img_path_labels["img_label"])
+
+            self.log.write_log(f'Total images loaded: {total_image} from {path_data}', message_type=0)
+
         return img_path_labels
 
+class DataGenerator(Dataset):
+    def __init__(self, data_dict, classes, testing=False, augmentation=None):
+        """
+            Args:
+
+                data_dict (dict) : a dictionary contain :{
+                                                            "path": [],
+                                                            "img_path": [],
+                                                            "img_label": [],
+                                                            "img_content": [],
+                                                            "transform_img_path": [],
+                                                            "transform_img_label": [],
+                                                            "transform_img_content": [],
+                                                        }
+                classes (list): list of class
+                testing (bool) : return  image(False)/image path(True)
+                augmentation (list): list augment option
+        """
+        self.img_path_labels = data_dict
+        self.classes = classes
+        self.augmentation = augmentation
+        self.testing = testing
 
     def __len__(self):
-        return len(self.img_path_labels)
-        # return 256
+        return len(self.img_path_labels['img_path'])
+        # return 16
 
     def __getitem__(self, index):
-        # seed = self.seeds[index]
-        # torch.manual_seed(seed)
-        # torch.cuda.manual_seed_all(seed)
-
-        image_name = self.img_path_labels[index][0].split("\\")[-1]
-
-        if self.augmentation and torch.randint(0, 2,(1,)).bool().item():
-            img_path = os.path.join(self.input_dir[0], "TransformImage", random.choice(self.augmentation)+"_"+image_name)
-            # print("[DEBUG] Used augment image")
-            # print(random.choice(self.augmentation))
-        else:
-            # print("[DEBUG] Used origin image")
-            img_path = self.img_path_labels[index][0]
-        
+        img_path = None
         try:
-            single_label= self.img_path_labels[index][1] # Pytorch don't use one-hot label
-        except:
-            single_label= self.num_of_classes
+            image_name = self.img_path_labels["img_path"][index].split("\\")[-1]
 
-        if self.testing:
-            return (img_path , single_label)
+            if self.augmentation and torch.randint(0, 2, (1,)).bool().item():
+                img_path = os.path.join(self.img_path_labels["path"][0], "TransformImage", random.choice(self.augmentation)+"_"+image_name)
+                img = self.img_path_labels["transform_img_content"][self.img_path_labels["transform_img_path"].index(img_path)]
+                # list_img = self.img_path_labels["transform_img_content"]
+                # index_img = self.img_path_labels["transform_img_path"].index(img_path)
 
-        else:
+            else:
+                img_path = self.img_path_labels["img_path"][index]
+                img = self.img_path_labels["img_content"][index]
+                # list_img = self.img_path_labels["img_content"]
+                # index_img = index
 
-            img, _ = load_and_crop(img_path, self.input_size, crop_opt=self.crop)
-            img = preprocess_input(img)
+            try:
+                single_label = self.classes.index(self.img_path_labels["img_label"][index]) # Pytorch don't use one-hot label
 
-            return (img, single_label, img_path)
-        # sample = {'img': img, 'label': single_label}
-        # sample = preprocess_input(sample)
-        # return sample
+
+
+            except:
+                # If the class name not in the current class pool
+                single_label = len(self.classes)
+
+            if self.testing:
+                return img_path, single_label
+
+            else:
+                if np.sum(img) == 0:
+                    img, _ = load_and_crop(img_path, img.shape[0], index_layer=img.shape[1])
+                    img = img.copy()
+                    img = preprocess_input(img)
+                    # We update the image into memory so that we won't load that image next time
+                    # list_img[index_img] = img
+
+                return img, single_label
+
+        except Exception as e:
+            if img_path is not None:
+                message = f"{e} at {img_path}"
+            else:
+                message = f"{e}"
+            raise Exception(message)
+
